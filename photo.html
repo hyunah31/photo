@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>📸 내 네컷 사진 받기</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { min-height: 100vh; font-family: -apple-system, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif; color: #2b2f45;
+    background: linear-gradient(160deg, #fbe3ee 0%, #ece3f7 45%, #dcebf8 100%); display: flex; flex-direction: column;
+    align-items: center; padding: 28px 18px 40px; text-align: center; }
+  h1 { font-size: 22px; margin-bottom: 6px; }
+  .sub { font-size: 14px; opacity: .7; margin-bottom: 18px; }
+  #photo { width: min(100%, 420px); border-radius: 10px; box-shadow: 0 10px 30px #6b4c7a33; background: #fff; display: none;
+    -webkit-touch-callout: default; }
+  .btns { display: flex; flex-direction: column; gap: 10px; width: min(100%, 420px); margin-top: 18px; }
+  button, .btn { display: block; width: 100%; padding: 15px; border-radius: 14px; border: 0; font-size: 17px; font-weight: 700;
+    font-family: inherit; cursor: pointer; text-decoration: none; }
+  .primary { background: #e886aa; color: #fff; box-shadow: 0 4px 0 #c2648a; }
+  .light { background: #fff; color: #2b2f45; box-shadow: 0 4px 0 #d9cfe6; }
+  .tip { margin-top: 16px; font-size: 13px; line-height: 1.6; opacity: .75; max-width: 420px; }
+  #msg { margin-top: 40px; font-size: 16px; line-height: 1.7; }
+  .spinner { width: 36px; height: 36px; border: 4px solid #fff; border-top-color: #e886aa; border-radius: 50%;
+    animation: spin 1s linear infinite; margin: 30px auto 12px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <h1>📸 오늘의 네컷</h1>
+  <p class="sub" id="expire">사진을 불러오고 있어요</p>
+  <div id="loading"><div class="spinner"></div></div>
+  <img id="photo" alt="네컷 사진">
+  <div class="btns" id="btns" style="display:none">
+    <button class="primary" id="saveBtn">📥 사진 저장하기</button>
+    <button class="light" id="shareBtn" style="display:none">공유하기 / 사진 앱에 저장</button>
+  </div>
+  <p class="tip" id="tip" style="display:none">저장이 안 되면 사진을 <b>길게 눌러</b> ‘이미지 저장’ 또는 ‘사진 앱에 추가’를 누르세요.<br>
+    카카오톡에서 열었다면 오른쪽 위 메뉴에서 ‘다른 브라우저로 열기’를 해 보세요.</p>
+  <p id="msg"></p>
+
+<script>
+  // ▼▼▼ 포토부스 설정에 넣은 값과 똑같이 바꿔 주세요 ▼▼▼
+  const FIREBASE = {
+    apiKey: 'AIzaSyBZ3H-jJuQ1HxME6es04CJkciRxOuS8cdE',
+    projectId: 'cutphoto-b232b',
+  };
+  // ▲▲▲
+
+  const $ = s => document.querySelector(s);
+  function fail(text) { $('#loading').style.display = 'none'; $('#expire').textContent = ''; $('#msg').innerHTML = text; }
+
+  (async () => {
+    const id = new URLSearchParams(location.search).get('id');
+    if (!id || !/^[A-Za-z0-9]{10,40}$/.test(id)) return fail('사진 주소가 올바르지 않아요.<br>QR 코드를 다시 찍어 주세요.');
+    let data;
+    try {
+      const r = await fetch(`https://firestore.googleapis.com/v1/projects/${encodeURIComponent(FIREBASE.projectId)}/databases/(default)/documents/photos/${id}?key=${encodeURIComponent(FIREBASE.apiKey)}`);
+      if (r.status === 404 || r.status === 403) return fail('사진을 찾을 수 없거나<br>보관 기간이 지났어요 🥲');
+      if (!r.ok) throw new Error(r.status);
+      data = (await r.json()).fields;
+    } catch (e) { return fail('사진을 불러오지 못했어요.<br>인터넷 연결을 확인하고 새로고침해 주세요.'); }
+
+    const src = data.img && data.img.stringValue;
+    if (!src || !src.startsWith('data:image/jpeg;base64,')) return fail('사진을 불러오지 못했어요.');
+    const exp = data.expireAt && new Date(data.expireAt.timestampValue);
+    if (exp && exp < new Date()) return fail('보관 기간이 지났어요 🥲');
+
+    const img = $('#photo'); img.src = src; img.style.display = 'block';
+    $('#loading').style.display = 'none'; $('#btns').style.display = 'flex'; $('#tip').style.display = 'block';
+    $('#expire').textContent = exp ? `${exp.getMonth() + 1}월 ${exp.getDate()}일까지 받을 수 있어요` : '';
+
+    const blob = await (await fetch(src)).blob();
+    const name = `네컷_${new Date().toISOString().slice(0, 10)}.jpg`;
+    const file = new File([blob], name, { type: 'image/jpeg' });
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      $('#shareBtn').style.display = 'block';
+      $('#shareBtn').onclick = () => navigator.share({ files: [file] }).catch(() => {});
+    }
+    $('#saveBtn').onclick = () => {
+      if (isIOS && navigator.canShare && navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file] }).catch(() => {}); return;   // 아이폰: 공유 시트에서 ‘이미지 저장’
+      }
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+    };
+  })();
+</script>
+</body>
+</html>
